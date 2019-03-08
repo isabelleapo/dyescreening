@@ -3,24 +3,67 @@ import stk
 import subprocess as sp
 import itertools
 from .utilities import *
+import re
+import os
 
 class DyeMaker:
+
+    ''' 
+    Builds dye structures and calculates IP, EA, optical gap and oscillator strength of first
+    excitation energy using xTB.
+    
+    Parameters
+    ----------
+    path_to_A_smiles:  :class:'str'
+        Path to text file containing list of smiles for monomer A
+
+    path_to_B_smiles:  :class:'str'
+        Path to text file containing list of smiles for monomer B
+
+    path_to_C_smiles:  :class:'str'
+        Path to text file containing list of smiles for monomer C
+
+    nconfs:  :class:'int'
+        Number of conformers to embed within conformer search
+
+    solvent:  :class:'str' 
+        Solvent to be used in xTB (available solvents: toluene,thf, methanol, h2o, ether,
+        chcl3, acetonitrile, acetone, cs2)
+
+
+    Methods
+    -------
+    dye_screen:
+        Builds dyes made up of all possible combinations of monomers from libraries for A, B and C
+        in the sequence ABCBA, performs a conformer search and calculates properties of the lowest 
+        energy conformers of these dyes.
+
+   
+    Returns
+    -------
+    .mol file containing lowest energy conformer
+
+    Text file containing calculated properties
+
+    '''
 
     def __init__(self,
                 path_to_A_smiles,
                 path_to_B_smiles,
                 path_to_C_smiles,
                 nconfs = 30,
-                #solvent = None
+                solvent = None
                 ):
 
         self.path_to_A_smiles = path_to_A_smiles
         self.path_to_B_smiles = path_to_B_smiles
         self.path_to_C_smiles = path_to_C_smiles
         self.nconfs = nconfs
-        #self.solvent = solvent
+        self.solvent = solvent
 
-    def CreateSmilesList(self):
+
+
+    def _create_smiles_list(self):
         with open(self.path_to_A_smiles + '.txt', 'r') as f:
             f2 = f.read()
             A_list = f2.split()
@@ -35,49 +78,49 @@ class DyeMaker:
 
         return A_list, B_list, C_list
 
-    # now we have a three lists containing all the strings
 
 
-    def DyeSmiletoMol(self, smiles):
+    def _dye_smile_to_mol(self, smiles):
         molobject = rdkit.MolFromSmiles(smiles)
         rdkit.AddHs(molobject)
         rdkit.AllChem.EmbedMolecule(molobject, rdkit.AllChem.ETKDG())
         return molobject
-# this turns smiles into mol object and we will feed in the lists at the end to this function (for i in Alist: DyeSmiletoMol(i))
 
-    def MakeDyeUnitA(self, molobject):
+
+
+    def _make_dye_unit_a(self, molobject):
         A = stk.StructUnit2.rdkit_init(molobject, 'bromine')
         return A
 
-    def MakeDyeUnit(self, molobject):
+
+
+    def _make_dye_unit(self, molobject):
         B = stk.StructUnit2.rdkit_init(molobject, 'bromine')
         return B
 
-#workflow
 
 
-#make 3 lists of smiles
-
-#now make lists of mol objects
-    def MolLists(self, A_list, B_list, C_list):
+    def _mol_lists(self, A_list, B_list, C_list):
         Amols = []
         Bmols = []
         Cmols = []
         for item in A_list:
-            A = self.DyeSmiletoMol(item)
+            A = self._dye_smile_to_mol(item)
             Amols.append(A)
 
         for item in B_list:
-            B = self.DyeSmiletoMol(item)
+            B = self._dye_smile_to_mol(item)
             Bmols.append(B)
 
         for item in C_list:
-            C = self.DyeSmiletoMol(item)
+            C = self._dye_smile_to_mol(item)
             Cmols.append(C)
 
         return Amols, Bmols, Cmols
 
-    def CombinerDyes(self, Amols, BMols, Cmols):
+
+
+    def _combiner_dyes(self, Amols, BMols, Cmols):
         dye_combo = itertools.product(Amols, BMols, Cmols, repeat=1)
         dye_combo = list(dye_combo)
         dyes = []
@@ -86,9 +129,9 @@ class DyeMaker:
         Bmol = [item[1] for item in dye_combo]
         Cmol = [item[2] for item in dye_combo]
         for i, value in enumerate(dye_combo):
-            A = self.MakeDyeUnitA(Amol[i])
-            B = self.MakeDyeUnit(Bmol[i])
-            C = self.MakeDyeUnit(Cmol[i])
+            A = self._make_dye_unit_a(Amol[i])
+            B = self._make_dye_unit(Bmol[i])
+            C = self._make_dye_unit(Cmol[i])
 
             dye = stk.Polymer([A, B, C], stk.Linear('ABCBA', [0,0,0,1,1], n=1))
             stk.rdkit_ETKDG(dye)
@@ -98,7 +141,8 @@ class DyeMaker:
         return dyes, ids
 
 
-    def conformer_search(self, dyes, ids):
+
+    def _conformer_search(self, dyes, ids):
         ndyes = []
         for i, dye in enumerate(dyes):
             dye = dye.mol
@@ -114,30 +158,39 @@ class DyeMaker:
                 if energy < lowest_energy:
                     lowest_energy = energy
                     lowest_conf = conf
-                ndyes.append(dye)
-            print(ndyes)
-            print(ids)
-            return ndyes, ids
             rdkit.MolToMolFile(dye, f'{ids[i]}_lowest-conformer.mol', confId=lowest_conf)
+            ndyes.append(dye)
+            n_dyes = zip(ndyes, ids)
+        return n_dyes
+   
 
-#IN PROGRESS!!!!!!!!!!-----------------------------------------------------------------------------------------------------
+ 
     def _properties(self, molfile, id):
-
+         
         dirname = str(id)+'_properties'
-        p = sp.Popen(['mkdir', dirname], stdin=sp.PIPE)
-        p, o = p.communicate()
-        cd(dirname)
+        os.mkdir(dirname)
+        os.chdir(dirname)
         xyz = generate_xyz(molfile)
-#---OPTIMISE
+        smiles = rdkit.MolToSmiles(molfile)
+        with open('f.txt', 'w') as f:
+            f.write('IP (eV)\tEA (eV)\tOptical gap (eV)\tOscillator strength\tSmiles\n')
 
-        p = sp.Popen(['xtb','xyz.xyz','-opt'], stdout=sp.PIPE)
-        output, _ = p.communicate()
+        if self.solvent != None:
+            p = sp.Popen(['xtb','xyz','-opt','-gbsa', self.solvent], stdout=sp.PIPE)
+            output, _ = p.communicate()
 
-#---CALCULATE IP
+        else:
+            p = sp.Popen(['xtb','xyz','-opt'], stdout=sp.PIPE)
+            output, _ = p.communicate()
 
+        if self.solvent != None:
+            p = sp.Popen(['xtb','xtbopt.xyz', '-vip', '-gbsa', self.solvent], stdout=sp.PIPE)
+            output, _ = p.communicate()                            
 
-        p = sp.Popen(['xtb','xtbopt.xyz', '-vip'], stdout=sp.PIPE)
-        output, _ = p.communicate()
+        else:
+            p = sp.Popen(['xtb','xtbopt.xyz', '-vip'], stdout=sp.PIPE)
+            output, _ = p.communicate()
+        
         with open('temp.txt', 'wb') as f:
             f.write(output)
             f.close()
@@ -145,23 +198,24 @@ class DyeMaker:
                 temp = f.read()
                 temp = str(temp)
 
-        with open('f.txt', 'w') as f:
-            f.write('Smiles     IP (eV)     EA (eV)     Optical gap (eV)     Oscillator strength\n')
-
         pattern = re.compile('(?<=delta SCC IP [(]eV[)].).*\d\.\d{4}')
         ip = pattern.findall(temp)
         with open('f.txt', 'a') as f:
             for match in ip:
                 match = match.strip()
-                f.write(match)
+                f.write(match+'\t')
 
         rt = sp.Popen(['rm','temp.txt'], stdout=sp.PIPE)
         o, e = rt.communicate()
 
-#---CALCULATE EA
+        if self.solvent != None:
+            p = sp.Popen(['xtb','xtbopt.xyz', '-vea', '-gbsa', self.solvent], stdout=sp.PIPE)
+            output, _ = p.communicate()                            
 
-        p = sp.Popen(['xtb','xtbopt.xyz', '-vea'], stdout=sp.PIPE)
-        output, _ = p.communicate()
+        else:
+            p = sp.Popen(['xtb','xtbopt.xyz', '-vea'], stdout=sp.PIPE)
+            output, _ = p.communicate()
+
         with open('temp.txt', 'wb') as f:
             f.write(output)
             f.close()
@@ -170,18 +224,16 @@ class DyeMaker:
                 temp = str(temp)
 
         pattern = re.compile('(?<=delta SCC EA [(]eV[)].).*\d\.\d{4}')
+        ea = pattern.findall(temp)
         with open('f.txt', 'a') as f:
-            f.write('        ')
-            for match in ip:
+            for match in ea:
                 match = match.strip()
-                f.write(match)
+                f.write(match+'\t')
 
         rt = sp.Popen(['rm','temp.txt'], stdout=sp.PIPE)
         o, e = rt.communicate()
 
-#---CALCULATE OPTICAL GAP
-
-        p = sp.Popen(['xtb','xyzopt.xyz'], stdout=sp.PIPE)
+        p = sp.Popen(['xtb','xtbopt.xyz'], stdout=sp.PIPE)
         output, _ = p.communicate()
 
         p = sp.Popen(['stda','-xtb', '-e', '8'], stdout=sp.PIPE)
@@ -193,27 +245,31 @@ class DyeMaker:
                 temp = f.read()
                 temp = str(temp)
 
-        pattern = re.compile('(?<=Rv[(]corr[)]\n    1).*\d\.\d{3}(?<=\d).*\d\.\d{3}')
-        ip = pattern.findall(temp)
+        pattern = re.compile(r'Rv\(corr\)\\n\s\s\s\s1\s*([\d\.-]+)\s+[\d\.-]+\s+([\d\.-]+)')
+        og = pattern.findall(temp)
         with open('f.txt', 'a') as f:
-            f.write('        ')
-            for match in ip:
-                match = match.strip()
-                f.write(match)
+            for match in og:
+                f.write(match[0]+'\t')
+                f.write(match[1]+'\t')
 
         rt = sp.Popen(['rm','temp.txt'], stdout=sp.PIPE)
         o, e = rt.communicate()
+        with open('f.txt', 'a') as f:
+            f.write(smiles)
+
         os.chdir('../')
 
-#IN PROGRESS!!!!!!!!!!-----------------------------------------------------------------------------------------------------~
 
-    def compute_properties(self, ndyes, ids):
-        for dye in ndyes:
-            self._properties(dye, ids)
 
-    def DyeScreen(self):
-        A_list, B_list, C_list = self.CreateSmilesList()
-        Amols, Bmols, Cmols = self.MolLists(A_list, B_list, C_list)
-        dyes, ids = self.CombinerDyes(Amols, Bmols, Cmols)
-        ndyes = self.conformer_search(dyes, ids)
-        self.compute_properties(ndyes, ids)
+    def _compute_properties(self, n_dyes):
+        for dye, id in n_dyes:
+            self._properties(dye, id)
+
+
+
+    def dye_screen(self):
+        A_list, B_list, C_list = self._create_smiles_list()
+        Amols, Bmols, Cmols = self._mol_lists(A_list, B_list, C_list)
+        dyes, ids = self._combiner_dyes(Amols, Bmols, Cmols)
+        n_dyes  = self._conformer_search(dyes, ids)
+        self._compute_properties(n_dyes)
