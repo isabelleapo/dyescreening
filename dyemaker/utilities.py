@@ -9,13 +9,3 @@ def generate_xyz(mol):
 
     p = sp.Popen(['babel', 'mol', 'xyz'], stdout=sp.PIPE)
     o, e = p.communicate()
-
-
-@contextmanager
-def cd(newdir):
-    prevdir = os.getcwd()
-    os.chdir(os.path.expanduser(newdir))
-    try:
-        yield
-    finally:
-        os.chdir(prevdir)
